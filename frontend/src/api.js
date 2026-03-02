@@ -879,11 +879,13 @@ export default class API {
   static async createChannelsFromStreamsAsync(
     streamIds,
     channelProfileIds = null,
+    numberingMode = 'provider',
     startingChannelNumber = null
   ) {
     try {
       const requestBody = {
         stream_ids: streamIds,
+        numbering_mode: numberingMode,
       };
 
       if (channelProfileIds !== null) {
@@ -2657,7 +2659,7 @@ export default class API {
       // Optimistically remove locally for instant UI update
       try {
         useChannelsStore.getState().removeRecording(id);
-      } catch {}
+      } catch { }
     } catch (e) {
       errorNotification(`Failed to delete recording ${id}`, e);
     }

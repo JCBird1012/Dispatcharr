@@ -2607,7 +2607,13 @@ def prefetch_recording_artwork(recording_id):
 
 
 @shared_task(bind=True)
-def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None, starting_channel_number=None):
+def bulk_create_channels_from_streams(
+    self,
+    stream_ids,
+    channel_profile_ids=None,
+    numbering_mode="provider",
+    starting_channel_number=None,
+):
     """
     Asynchronously create channels from a list of stream IDs.
     Provides progress updates via WebSocket.
@@ -2615,10 +2621,12 @@ def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None
     Args:
         stream_ids: List of stream IDs to create channels from
         channel_profile_ids: Optional list of channel profile IDs to assign channels to
-        starting_channel_number: Optional starting channel number behavior:
-            - None: Use provider channel numbers, then auto-assign from 1
-            - 0: Start with lowest available number and increment by 1
-            - Other number: Use as starting number for auto-assignment
+        numbering_mode: Required numbering mode behavior:
+            - provider: Use provider numbers when available, else auto-assign
+            - lowest: Ignore provider numbers, start from lowest available and increment
+            - highest: Ignore provider numbers, start from the next whole number above the current highest channel number (e.g., 4.1 -> 5) and increment
+            - custom: Ignore provider numbers, start from starting_channel_number and increment
+        starting_channel_number: Required when numbering_mode is custom
     """
     from apps.channels.models import Stream, Channel, ChannelGroup, ChannelProfile, ChannelProfileMembership, Logo
     from apps.epg.models import EPGData
@@ -2642,19 +2650,31 @@ def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None
             'message': f'Starting bulk creation of {total_streams} channels...'
         })
 
-        # Gather current used numbers once
-        used_numbers = set(Channel.objects.all().values_list("channel_number", flat=True))
+        if numbering_mode not in {"provider", "lowest", "highest", "custom"}:
+            raise ValueError("numbering_mode must be one of: provider, lowest, highest, custom")
 
-        # Initialize next_number based on starting_channel_number mode
-        if starting_channel_number is None:
-            # Mode 1: Use provider numbers when available, auto-assign when not
-            next_number = 1
-        elif starting_channel_number == 0:
-            # Mode 2: Start from lowest available number
-            next_number = 1
-        else:
-            # Mode 3: Start from specified number
-            next_number = starting_channel_number
+        if numbering_mode == "custom" and starting_channel_number is None:
+            raise ValueError("starting_channel_number is required when numbering_mode=custom")
+
+        # Gather current used numbers once (float-safe, ignore null/invalid values)
+        used_numbers = set()
+        for number in Channel.objects.exclude(channel_number__isnull=True).values_list("channel_number", flat=True):
+            try:
+                used_numbers.add(float(number))
+            except (TypeError, ValueError):
+                continue
+
+        # Initialize next_number based on explicit numbering mode
+        if numbering_mode in {"provider", "lowest"}:
+            next_number = 1.0
+        elif numbering_mode == "highest":
+            if used_numbers:
+                highest_floor = max(int(float(number)) for number in used_numbers)
+                next_number = float(highest_floor + 1)
+            else:
+                next_number = 1.0
+        else:  # custom
+            next_number = float(starting_channel_number)
 
         def get_auto_number():
             nonlocal next_number
@@ -2698,13 +2718,12 @@ def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None
                     # Determine channel number based on starting_channel_number mode
                     channel_number = None
 
-                    if starting_channel_number is None:
-                        # Mode 1: Use provider numbers when available (from stream_chno field)
+                    if numbering_mode == "provider":
+                        # Use provider numbers when available (from stream_chno field)
                         if stream.stream_chno is not None:
                             channel_number = stream.stream_chno
 
-                    # For modes 2 and 3 (starting_channel_number == 0 or specific number),
-                    # ignore provider numbers and use sequential assignment
+                    # For lowest/highest/custom modes, ignore provider numbers and use sequential assignment
 
                     # Get TVC guide station ID
                     tvc_guide_stationid = None
@@ -2712,15 +2731,23 @@ def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None
                         tvc_guide_stationid = stream_custom_props["tvc-guide-stationid"]
 
                     # Check if the determined/provider number is available
-                    if channel_number is not None and (
-                        channel_number in used_numbers
-                        or Channel.objects.filter(channel_number=channel_number).exists()
+                    channel_number_float = None
+                    if channel_number is not None:
+                        try:
+                            channel_number_float = float(channel_number)
+                        except (TypeError, ValueError):
+                            channel_number_float = None
+
+                    if channel_number_float is not None and (
+                        channel_number_float in used_numbers
+                        or Channel.objects.filter(channel_number=channel_number_float).exists()
                     ):
                         # Provider number is taken, use auto-assignment
                         channel_number = get_auto_number()
-                    elif channel_number is not None:
+                    elif channel_number_float is not None:
                         # Provider number is available, use it
-                        used_numbers.add(channel_number)
+                        channel_number = channel_number_float
+                        used_numbers.add(channel_number_float)
                     else:
                         # No provider number or ignoring provider numbers, use auto-assignment
                         channel_number = get_auto_number()

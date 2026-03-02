@@ -1021,8 +1021,13 @@ class ChannelViewSet(viewsets.ModelViewSet):
             name="FromStreamRequest",
             fields={
                 "stream_id": serializers.IntegerField(help_text="ID of the stream to link"),
+                "numbering_mode": serializers.ChoiceField(
+                    choices=["provider", "lowest", "highest", "custom"],
+                    help_text="Required numbering mode: provider|lowest|highest|custom (highest uses next whole number above current max, e.g. 4.1 -> 5)",
+                    required=True,
+                ),
                 "channel_number": serializers.FloatField(
-                    help_text="(Optional) Desired channel number. Must not be in use.",
+                    help_text="Required when numbering_mode=custom. Desired channel number. Must not be in use.",
                     required=False,
                 ),
                 "name": serializers.CharField(help_text="Desired channel name", required=False),
@@ -1038,10 +1043,19 @@ class ChannelViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["post"], url_path="from-stream")
     def from_stream(self, request):
         stream_id = request.data.get("stream_id")
+        numbering_mode = request.data.get("numbering_mode")
+
         if not stream_id:
             return Response(
                 {"error": "Missing stream_id"}, status=status.HTTP_400_BAD_REQUEST
             )
+
+        if numbering_mode not in {"provider", "lowest", "highest", "custom"}:
+            return Response(
+                {"error": "numbering_mode must be one of: provider, lowest, highest, custom"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         stream = get_object_or_404(Stream, pk=stream_id)
         channel_group = stream.channel_group
 
@@ -1051,27 +1065,36 @@ class ChannelViewSet(viewsets.ModelViewSet):
         if name is None:
             name = stream.name
 
-        # Check if client provided a channel_number; if not, use stream_chno or auto-assign
-        channel_number = request.data.get("channel_number")
+        requested_channel_number = request.data.get("channel_number")
 
-        if channel_number is None:
-            # Channel number not provided by client, check stream's channel number or auto-assign
-            if stream.stream_chno is not None:
-                channel_number = stream.stream_chno
-        elif channel_number == 0:
-            # Special case: 0 means ignore provider numbers and auto-assign
-            channel_number = None
-
-        if channel_number is None:
-            # Still None, auto-assign the next available channel number
+        if numbering_mode == "provider":
+            channel_number = stream.stream_chno
+            if channel_number is None:
+                channel_number = Channel.get_next_available_channel_number()
+        elif numbering_mode == "lowest":
             channel_number = Channel.get_next_available_channel_number()
+        elif numbering_mode == "highest":
+            highest_floor = 0
+            for value in Channel.objects.exclude(channel_number__isnull=True).values_list("channel_number", flat=True):
+                try:
+                    highest_floor = max(highest_floor, int(float(value)))
+                except (TypeError, ValueError):
+                    continue
+            channel_number = Channel.get_next_available_channel_number(highest_floor + 1)
+        else:  # custom
+            if requested_channel_number is None:
+                return Response(
+                    {"error": "channel_number is required when numbering_mode=custom"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            channel_number = requested_channel_number
 
 
         try:
             channel_number = float(channel_number)
-        except ValueError:
+        except (TypeError, ValueError):
             return Response(
-                {"error": "channel_number must be an integer."},
+                {"error": "channel_number must be a valid number."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         # If the provided number is already used, return an error.
@@ -1197,13 +1220,18 @@ class ChannelViewSet(viewsets.ModelViewSet):
                     child=serializers.IntegerField(),
                     help_text="List of stream IDs to create channels from"
                 ),
+                "numbering_mode": serializers.ChoiceField(
+                    choices=["provider", "lowest", "highest", "custom"],
+                    help_text="Required numbering mode: provider|lowest|highest|custom (highest uses next whole number above current max, e.g. 4.1 -> 5)",
+                    required=True,
+                ),
                 "channel_profile_ids": serializers.ListField(
                     child=serializers.IntegerField(),
                     help_text="(Optional) Channel profile ID(s). Behavior: omitted = add to ALL profiles (default); empty array [] = add to NO profiles; [0] = add to ALL profiles (explicit); [1,2,...] = add only to specified profiles.",
                     required=False,
                 ),
-                "starting_channel_number": serializers.IntegerField(
-                    help_text="(Optional) Starting channel number mode: null=use provider numbers, 0=lowest available, other=start from specified number",
+                "starting_channel_number": serializers.FloatField(
+                    help_text="Required when numbering_mode=custom. Starting channel number for sequential assignment.",
                     required=False,
                 ),
             },
@@ -1215,6 +1243,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
 
         stream_ids = request.data.get("stream_ids", [])
         channel_profile_ids = request.data.get("channel_profile_ids")
+        numbering_mode = request.data.get("numbering_mode")
         starting_channel_number = request.data.get("starting_channel_number")
 
         if not stream_ids:
@@ -1229,13 +1258,30 @@ class ChannelViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        if numbering_mode not in {"provider", "lowest", "highest", "custom"}:
+            return Response(
+                {"error": "numbering_mode must be one of: provider, lowest, highest, custom"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if numbering_mode == "custom" and starting_channel_number is None:
+            return Response(
+                {"error": "starting_channel_number is required when numbering_mode=custom"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Normalize channel_profile_ids to array if single ID provided
         if channel_profile_ids is not None:
             if not isinstance(channel_profile_ids, list):
                 channel_profile_ids = [channel_profile_ids]
 
         # Start the async task
-        task = bulk_create_channels_from_streams.delay(stream_ids, channel_profile_ids, starting_channel_number)
+        task = bulk_create_channels_from_streams.delay(
+            stream_ids,
+            channel_profile_ids,
+            numbering_mode,
+            starting_channel_number,
+        )
 
         return Response({
             "task_id": task.id,

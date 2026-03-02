@@ -35,9 +35,6 @@ const CreateChannelModal = ({
   const confirmLabel = isBulk ? 'Create Channels' : 'Create Channel';
   const numberingLabel = isBulk ? 'Numbering Mode' : 'Number Assignment';
 
-  // For bulk: use 'custom' mode, for single: use 'specific' mode
-  const customModeValue = isBulk ? 'custom' : 'specific';
-
   // Convert channel profiles to MultiSelect data format with groups
   // Filter out the "All" profile (id '0') and add our own special options
   const profileOptions = [
@@ -117,7 +114,7 @@ const CreateChannelModal = ({
               }
             />
             <Radio
-              value="auto"
+              value="lowest"
               label={
                 isBulk ? 'Auto-Assign Sequential' : 'Auto-Assign Next Available'
               }
@@ -128,7 +125,18 @@ const CreateChannelModal = ({
               }
             />
             <Radio
-              value={customModeValue}
+              value="highest"
+              label={
+                isBulk ? 'Start at Highest + 1' : 'Use Highest + 1'
+              }
+              description={
+                isBulk
+                  ? 'Start from the next whole number above the current highest channel (e.g., 4.1 → 5), then increment by 1'
+                  : 'Assign the next whole number above the current highest channel (e.g., 4.1 → 5)'
+              }
+            />
+            <Radio
+              value="custom"
               label={
                 isBulk ? 'Start from Custom Number' : 'Use Specific Number'
               }
@@ -141,7 +149,7 @@ const CreateChannelModal = ({
           </Stack>
         </Radio.Group>
 
-        {mode === customModeValue && (
+        {mode === 'custom' && (
           <NumberInput
             label={isBulk ? 'Starting Channel Number' : 'Channel Number'}
             description={
