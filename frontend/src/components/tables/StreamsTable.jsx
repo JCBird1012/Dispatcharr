@@ -739,13 +739,41 @@ const StreamsTable = ({ onReady }) => {
     }
   };
 
+  const resolveSelectedStream = async (streamId) => {
+    const streamFromCurrentPage = data.find((stream) => stream.id === streamId);
+    if (streamFromCurrentPage) {
+      return streamFromCurrentPage;
+    }
+
+    const response = await API.getStreams([streamId]);
+    if (Array.isArray(response)) {
+      return (
+        response.find((stream) => Number(stream.id) === Number(streamId)) ||
+        response[0] ||
+        null
+      );
+    }
+
+    if (Array.isArray(response?.results)) {
+      return (
+        response.results.find(
+          (stream) => Number(stream.id) === Number(streamId)
+        ) || null
+      );
+    }
+
+    return null;
+  };
+
   const createChannelsFromSelection = async () => {
     if (selectedStreamIds.length === 1) {
-      const selectedStream = data.find((stream) => stream.id === selectedStreamIds[0]);
+      const selectedStream = await resolveSelectedStream(selectedStreamIds[0]);
       if (selectedStream) {
         await createChannelFromStream(selectedStream);
         return;
       }
+
+      return;
     }
 
     await createChannelsFromStreams();
