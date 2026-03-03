@@ -127,12 +127,14 @@ const CreateChannelModal = ({
             <Radio
               value="highest"
               label={
-                isBulk ? 'Start at Highest + 1' : 'Use Highest + 1'
+                isBulk
+                  ? 'Start at Next Highest Channel'
+                  : 'Use Next Highest Channel'
               }
               description={
                 isBulk
-                  ? 'Start from the next whole number above the current highest channel (e.g., 4.1 → 5), then increment by 1'
-                  : 'Assign the next whole number above the current highest channel (e.g., 4.1 → 5)'
+                  ? 'Start from the next whole channel number above the current highest (e.g., 4.1 → 5), then increment by 1'
+                  : 'Assign the next whole channel number above the current highest (e.g., 4.1 → 5)'
               }
             />
             <Radio

@@ -1023,7 +1023,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
                 "stream_id": serializers.IntegerField(help_text="ID of the stream to link"),
                 "numbering_mode": serializers.ChoiceField(
                     choices=["provider", "lowest", "highest", "custom"],
-                    help_text="Required numbering mode: provider|lowest|highest|custom (highest uses next whole number above current max, e.g. 4.1 -> 5)",
+                    help_text="Required numbering mode: provider|lowest|highest|custom",
                     required=True,
                 ),
                 "channel_number": serializers.FloatField(
@@ -1222,7 +1222,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
                 ),
                 "numbering_mode": serializers.ChoiceField(
                     choices=["provider", "lowest", "highest", "custom"],
-                    help_text="Required numbering mode: provider|lowest|highest|custom (highest uses next whole number above current max, e.g. 4.1 -> 5)",
+                    help_text="Required numbering mode: provider|lowest|highest|custom",
                     required=True,
                 ),
                 "channel_profile_ids": serializers.ListField(
