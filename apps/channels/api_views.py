@@ -1089,7 +1089,6 @@ class ChannelViewSet(viewsets.ModelViewSet):
                 )
             channel_number = requested_channel_number
 
-
         try:
             channel_number = float(channel_number)
         except (TypeError, ValueError):
